@@ -1,6 +1,6 @@
 # StarMap
 
-A Windows desktop recreation of NASA's "Eyes on the Solar System": a WinUI 3 (Windows App SDK) shell hosting a Three.js WebView2 scene driven by real JPL ephemeris data, with time controls, layer toggles, and a native inspector.
+A Windows desktop recreation of NASA's "Eyes on the Solar System": a native WinUI 3 (Windows App SDK) shell hosting a Three.js WebView2 scene driven by real JPL ephemeris data, with an immersive overlay interface, time controls, layer toggles, and a contextual inspector.
 
 ## Features
 
@@ -14,8 +14,16 @@ A Windows desktop recreation of NASA's "Eyes on the Solar System": a WinUI 3 (Wi
   - Raycast picking: hover highlights a label, click selects in the inspector, double-click focuses the camera.
 - **Time controls** — play/pause, 10 speed presets (1 s/s … 1000 yr/s), date/time pickers, "Now" button. The inspector shows live distance, semi-major axis, eccentricity, inclination, and period.
 - **Layer toggles** — Planets, Moons, Orbits, Trails, Labels, Stars, Asteroid belt, Small bodies.
-- **Searchable body list** and a right-hand inspector panel.
+- **Searchable body list** and a contextual left-side inspector panel.
+- **Eyes-style navigation** — edge-to-edge space viewport, Explore/Info/View overlays, breadcrumb selection, camera rail, overview reset, zoom controls, natural/flood lighting, and a centered live-time console.
+- **Desktop interactions** — native tooltips and dialogs, clipboard sharing, plus Space, Home, Ctrl+F, and Escape keyboard shortcuts.
 - Offline-first: a small-body seed catalog with real elements is bundled, and the SBDB cache is reused on startup.
+
+## Native UI boundary
+
+All application UI is native WinUI 3: `Window`, `Grid`, `Border`, `Button`, `ToggleButton`, `ToggleSwitch`, `TextBox`, `ListView`, `DatePicker`, `TimePicker`, `ComboBox`, `ContentDialog`, and related XAML primitives come from `Microsoft.UI.Xaml`. WebView2 is used only as the GPU-backed surface for the Three.js solar-system visualization; it does not implement the app chrome, panels, forms, menus, or accessibility semantics.
+
+The current interface needs no Windows Community Toolkit dependency because WinUI 3 already supplies every control used here. If a Toolkit component is introduced later, use the `CommunityToolkit.WinUI.*` package family intended for Windows App SDK / WinUI 3—not the UWP `CommunityToolkit.Uwp.*` packages.
 
 ## Building
 
@@ -31,7 +39,7 @@ The app is unpackaged and self-contained (`WindowsPackageType=None`, `WindowsApp
 
 ## Project layout
 
-- `MainWindow.xaml(.cs)` — WinUI shell: header, left rail, WebView2 canvas, inspector, time bar; host↔web messaging bridge.
+- `MainWindow.xaml(.cs)` — native WinUI shell: title bar, contextual overlays, camera rail, search, inspector, layer options, time console, and host↔web messaging bridge.
 - `Data/BodyCatalog.cs` — bundled catalog (planets, Moon, Pluto, small-body seed).
 - `Data/Ephemeris.cs` — Keplerian propagation mirror (C# side).
 - `SbdbClient.cs` — JPL SBDB client + cache.

@@ -24,10 +24,12 @@ function isSmallKind(kind) {
 
 export function createScene({ container, onFrame, onSelected, onFocus }) {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x020208);
+  scene.background = new THREE.Color(0x010204);
 
   const camera = new THREE.PerspectiveCamera(60, 1, 0.005, 200000);
-  camera.position.set(0, 150, 300);
+  const overviewTarget = new THREE.Vector3(-65, 0, 0);
+  const overviewPosition = new THREE.Vector3(-65, 165, 315);
+  camera.position.copy(overviewPosition);
 
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
@@ -51,11 +53,13 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
   controls.minDistance = 0.02;
   controls.maxDistance = 40000;
   controls.zoomSpeed = 1.1;
+  controls.target.copy(overviewTarget);
 
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   // ---------------------------------------------------------------- lights
-  scene.add(new THREE.AmbientLight(0x15151f, 0.6));
+  const ambientLight = new THREE.AmbientLight(0x202635, 0.42);
+  scene.add(ambientLight);
   const sunLight = new THREE.PointLight(0xfff2d8, 2.4, 0, 0);
   sunLight.position.set(0, 0, 0);
   scene.add(sunLight);
@@ -70,10 +74,12 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
   const records = new Map(); // id -> record
   const ZERO = new THREE.Vector3(0, 0, 0);
   let timeMs = Date.now();
-  let speedSeconds = 86400;
+  let speedSeconds = 1;
   let playing = true;
   let followId = null;
+  let selectedId = null;
   let flight = null;
+  let floodLighting = false;
   let toggles = {
     planets: true, moons: true, orbits: true, trails: true,
     labels: true, stars: true, belt: true, smallBodies: true,
@@ -147,10 +153,16 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
     return new THREE.Points(geo, mat);
   }
 
-  function makeLabel(text) {
+  function makeLabel(text, color) {
     const div = document.createElement('div');
     div.className = 'label';
-    div.textContent = text;
+    div.style.setProperty('--body-color', color || '#9aa3ad');
+    const marker = document.createElement('span');
+    marker.className = 'label-marker';
+    const name = document.createElement('span');
+    name.className = 'label-name';
+    name.textContent = text;
+    div.append(marker, name);
     if (reduceMotion) div.style.animation = 'none';
     return new CSS2DObject(div);
   }
@@ -232,6 +244,7 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
           sunDir: { value: new THREE.Vector3(1, 0, 0) },
           specColor: { value: new THREE.Color(body.specColor || '#ffffff') },
           specIntensity: { value: body.specular ? (body.specIntensity || 0.3) : 0 },
+          floodMix: { value: 0 },
         },
         vertexShader: `
           varying vec2 vUv;
@@ -246,11 +259,11 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
           }`,
         fragmentShader: `
           uniform sampler2D dayMap; uniform sampler2D nightMap;
-          uniform vec3 sunDir; uniform vec3 specColor; uniform float specIntensity;
+          uniform vec3 sunDir; uniform vec3 specColor; uniform float specIntensity; uniform float floodMix;
           varying vec2 vUv; varying vec3 vNormal; varying vec3 vWorldPos;
           void main() {
             vec3 n = normalize(vNormal);
-            float sunAmt = max(dot(n, sunDir), 0.0);
+            float sunAmt = mix(max(dot(n, sunDir), 0.0), 1.0, floodMix);
             vec3 day = texture2D(dayMap, vUv).rgb;
             vec3 night = texture2D(nightMap, vUv).rgb * 1.6;
             vec3 color = mix(night, day, smoothstep(0.04, 0.42, sunAmt));
@@ -350,7 +363,7 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
       mover.userData.spinMesh = mesh;
     }
 
-    const label = makeLabel(body.name);
+    const label = makeLabel(body.name, body.color);
     label.position.y = (body.visualRadius || 1) + 1.0;
     mover.add(label);
     mesh.userData.bodyId = body.id;
@@ -370,9 +383,9 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(pts, 3));
         const mat = new THREE.LineBasicMaterial({
-          color: 0x4a5a7a,
+          color: hexColor(body.color, '#65717c'),
           transparent: true,
-          opacity: isSmallKind(body.kind) ? 0.45 : 0.75,
+          opacity: isSmallKind(body.kind) ? 0.24 : 0.62,
         });
         orbit = new THREE.LineLoop(geo, mat);
         parentObj.add(orbit);
@@ -452,6 +465,19 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
     belt.visible = toggles.belt;
   }
 
+  function setSelection(id) {
+    selectedId = id && records.has(id) ? id : null;
+    for (const [bodyId, rec] of records) {
+      const selected = bodyId === selectedId;
+      rec.label.element.classList.toggle('selected', selected);
+      if (rec.orbit) {
+        rec.orbit.material.opacity = selected
+          ? 1
+          : (isSmallKind(rec.info.kind) ? 0.24 : 0.62);
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- picking
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
@@ -515,6 +541,7 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
       toTarget: bodyPos.clone(),
     };
     followId = id;
+    setSelection(id);
     controls.enabled = false;
   }
 
@@ -534,6 +561,7 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
   renderer.domElement.addEventListener('click', (e) => {
     const rec = pickMesh(e);
     if (rec) flyTo(rec.info.id);
+    else setSelection(null);
     onSelected?.(rec ? rec.info.id : null);
   });
 
@@ -562,6 +590,7 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
   function setBodies(bodies) {
     for (const b of bodies) addBody(b);
     applyVisibility();
+    setLighting(floodLighting);
   }
 
   function setToggles(next) {
@@ -576,6 +605,40 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
 
   function setSpeed(s) { speedSeconds = s; }
   function setPlaying(p) { playing = p; }
+  function setLighting(flood) {
+    floodLighting = Boolean(flood);
+    ambientLight.intensity = floodLighting ? 1.85 : 0.42;
+    for (const rec of records.values()) {
+      const uniforms = rec.mesh?.material?.uniforms;
+      if (uniforms?.floodMix) uniforms.floodMix.value = floodLighting ? 1 : 0;
+    }
+  }
+
+  function adjustZoom(factor) {
+    const offset = camera.position.clone().sub(controls.target);
+    const nextDistance = THREE.MathUtils.clamp(
+      offset.length() * factor,
+      controls.minDistance,
+      controls.maxDistance,
+    );
+    camera.position.copy(controls.target).add(offset.normalize().multiplyScalar(nextDistance));
+    controls.update();
+  }
+
+  function resetView() {
+    followId = null;
+    const target = overviewTarget.clone();
+    flight = {
+      t: 0,
+      dur: reduceMotion ? 0.01 : 0.8,
+      fromPos: camera.position.clone(),
+      fromTarget: controls.target.clone(),
+      toPos: overviewPosition.clone(),
+      toTarget: target,
+    };
+    controls.enabled = false;
+  }
+
   function focus(id) {
     if (!records.has(id)) return;
     followId = id;
@@ -632,8 +695,8 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
       updateFlight(dtSec);
     } else if (followId && records.has(followId)) {
       controls.target.lerp(records.get(followId).helio, 0.08);
-    } else if (!controls.target.equals(ZERO)) {
-      controls.target.lerp(ZERO, 0.06);
+    } else if (!controls.target.equals(overviewTarget)) {
+      controls.target.lerp(overviewTarget, 0.06);
     }
 
     controls.update();
@@ -665,6 +728,10 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
     setTime,
     setSpeed,
     setPlaying,
+    setLighting,
+    setSelection,
+    adjustZoom,
+    resetView,
     focus,
     resize,
   };

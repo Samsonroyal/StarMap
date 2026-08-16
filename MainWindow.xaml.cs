@@ -1,15 +1,22 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Windows.ApplicationModel.DataTransfer;
+using Windows.System;
+using Windows.UI.Core;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.Web.WebView2.Core;
 using StarMap.Data;
 using StarMap.Models;
@@ -43,10 +50,22 @@ namespace StarMap
     }
 
     /// <summary>An inspector label/value row.</summary>
-    public sealed class InspectorRow
+    public sealed class InspectorRow : INotifyPropertyChanged
     {
         public string Label { get; set; } = "";
-        public string Value { get; set; } = "";
+        private string _value = "";
+        public string Value
+        {
+            get => _value;
+            set
+            {
+                if (_value == value) return;
+                _value = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Value)));
+            }
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
     }
 
     /// <summary>A speed preset (seconds of simulation per real second).</summary>
@@ -73,11 +92,13 @@ namespace StarMap
         private bool _syncingTime;
         private bool _syncingSelection;
         private bool _playing = true;
-        private double _speedSeconds = 86400.0;
+        private double _speedSeconds = 1.0;
         private DateTime _simTimeUtc = DateTime.UtcNow;
         private BodyInfo? _selected;
         private InspectorRow? _distanceRow;
         private string? _pendingFocus;
+        private bool _floodLighting;
+        private readonly DispatcherTimer _toastTimer = new();
 
         public ObservableCollection<BodyRow> BodyRows { get; } = new();
 
@@ -87,12 +108,22 @@ namespace StarMap
             // default; without it async continuations resume on the thread pool and
             // touching UI collections throws 0x8001010E.
             SynchronizationContext.SetSynchronizationContext(
-                new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread()));
+                new DispatcherQueueSynchronizationContext(Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread()));
 
             this.InitializeComponent();
             App.Log.Info("MainWindow constructed.");
 
+            ExtendsContentIntoTitleBar = true;
+            SetTitleBar(HeaderDragRegion);
+
             AppWindow.Resize(new Windows.Graphics.SizeInt32(1440, 900));
+
+            _toastTimer.Interval = TimeSpan.FromSeconds(2.4);
+            _toastTimer.Tick += (_, _) =>
+            {
+                _toastTimer.Stop();
+                ToastBar.Visibility = Visibility.Collapsed;
+            };
 
             BuildSpeedPresets();
             BuildBodyList(BodyCatalog.All);
@@ -100,6 +131,7 @@ namespace StarMap
             DatePicker.MinYear = new DateTimeOffset(1600, 1, 1, 0, 0, 0, TimeSpan.Zero);
             DatePicker.MaxYear = new DateTimeOffset(2600, 12, 31, 0, 0, 0, TimeSpan.Zero);
             TimePicker.ClockIdentifier = "24HourClock";
+            SyncTimeControls();
 
             _ = InitializeAsync();
             _ = LoadSmallBodiesAsync();
@@ -185,8 +217,13 @@ namespace StarMap
                         OnWebReady();
                         break;
                     case "selected":
-                        if (root.TryGetProperty("id", out var sel) && sel.GetString() is string selId)
-                            SelectBody(selId, focus: false);
+                        if (root.TryGetProperty("id", out var sel))
+                        {
+                            if (sel.ValueKind == JsonValueKind.String && sel.GetString() is string selId)
+                                SelectBody(selId, focus: false);
+                            else
+                                ClearSelection();
+                        }
                         break;
                     case "frame":
                         OnFrame(root);
@@ -219,6 +256,7 @@ namespace StarMap
             };
             TryPost(payload);
             PostToggles();
+            TryPost(new { type = "setLighting", flood = _floodLighting });
 
             if (_pendingSmallBodies.Count > 0)
                 PostAddBodies(_pendingSmallBodies);
@@ -387,6 +425,10 @@ namespace StarMap
 
             InspectorRows.ItemsSource = rows;
             InspectorDescription.Text = body.Description ?? "";
+            InfoTabButton.IsEnabled = true;
+            BreadcrumbText.Text = body.Name;
+            BreadcrumbPanel.Visibility = Visibility.Visible;
+            ShowPanel("info");
         }
 
         private static InspectorRow Row(string label, string value) => new InspectorRow { Label = label, Value = value };
@@ -428,20 +470,20 @@ namespace StarMap
         {
             var presets = new (string, double)[]
             {
-                ("1 second / s", 1),
-                ("1 minute / s", 60),
-                ("1 hour / s", 3600),
-                ("1 day / s", 86400),
-                ("7 days / s", 604800),
-                ("30 days / s", 2592000),
-                ("1 year / s", 31557600),
-                ("10 years / s", 315576000),
-                ("100 years / s", 3155760000L),
-                ("1000 years / s", 31557600000L),
+                ("REAL RATE", 1),
+                ("1 MIN / SEC", 60),
+                ("1 HOUR / SEC", 3600),
+                ("1 DAY / SEC", 86400),
+                ("7 DAYS / SEC", 604800),
+                ("30 DAYS / SEC", 2592000),
+                ("1 YEAR / SEC", 31557600),
+                ("10 YEARS / SEC", 315576000),
+                ("100 YEARS / SEC", 3155760000L),
+                ("1000 YEARS / SEC", 31557600000L),
             };
             SpeedBox.ItemsSource = presets.Select(p => new SpeedPreset(p.Item1, p.Item2)).ToList();
             SpeedBox.DisplayMemberPath = nameof(SpeedPreset.Label);
-            SpeedBox.SelectedIndex = 3; // 1 day/s
+            SpeedBox.SelectedIndex = 0;
         }
 
         private void SpeedBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -527,6 +569,149 @@ namespace StarMap
         private void Toggle_Toggled(object sender, RoutedEventArgs e)
         {
             if (_webReady) PostToggles();
+        }
+
+        // ============================================================ Immersive shell
+
+        private void ShowPanel(string panel)
+        {
+            SidebarShell.Visibility = Visibility.Visible;
+            RestoreSidebarButton.Visibility = Visibility.Collapsed;
+            ExplorePanel.Visibility = panel == "explore" ? Visibility.Visible : Visibility.Collapsed;
+            InfoPanel.Visibility = panel == "info" ? Visibility.Visible : Visibility.Collapsed;
+            ViewPanel.Visibility = panel == "view" ? Visibility.Visible : Visibility.Collapsed;
+
+            var active = (Brush)Application.Current.Resources["OverlayStrokeBrush"];
+            var inactive = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            ExploreTabButton.Background = panel == "explore" ? active : inactive;
+            InfoTabButton.Background = panel == "info" ? active : inactive;
+            ViewTabButton.Background = panel == "view" ? active : inactive;
+        }
+
+        private void ExploreTabButton_Click(object sender, RoutedEventArgs e) => ShowPanel("explore");
+        private void InfoTabButton_Click(object sender, RoutedEventArgs e) => ShowPanel("info");
+        private void ViewTabButton_Click(object sender, RoutedEventArgs e) => ShowPanel("view");
+        private void LayersButton_Click(object sender, RoutedEventArgs e) => ShowPanel("view");
+
+        private void ToggleSidebarButton_Click(object sender, RoutedEventArgs e)
+        {
+            var open = SidebarShell.Visibility == Visibility.Visible;
+            SidebarShell.Visibility = open ? Visibility.Collapsed : Visibility.Visible;
+            RestoreSidebarButton.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void SearchTopButton_Click(object sender, RoutedEventArgs e)
+        {
+            ShowPanel("explore");
+            SearchBox.Focus(FocusState.Programmatic);
+        }
+
+        private void ClearSelection()
+        {
+            _selected = null;
+            _distanceRow = null;
+            _syncingSelection = true;
+            BodiesList.SelectedItem = null;
+            _syncingSelection = false;
+            InspectorBody.Visibility = Visibility.Collapsed;
+            InspectorEmpty.Visibility = Visibility.Visible;
+            InfoTabButton.IsEnabled = false;
+            BreadcrumbPanel.Visibility = Visibility.Collapsed;
+            ShowPanel("explore");
+            if (_webReady) TryPost(new { type = "select", id = (string?)null });
+        }
+
+        private void HomeButton_Click(object sender, RoutedEventArgs e)
+        {
+            ClearSelection();
+            if (_webReady) TryPost(new { type = "resetView" });
+        }
+
+        private void ResetViewButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_webReady) TryPost(new { type = "resetView" });
+            ShowToast("Solar system overview");
+        }
+
+        private void ZoomInButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_webReady) TryPost(new { type = "zoom", factor = 0.72 });
+        }
+
+        private void ZoomOutButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_webReady) TryPost(new { type = "zoom", factor = 1.38 });
+        }
+
+        private void LightingButton_Click(object sender, RoutedEventArgs e)
+        {
+            _floodLighting = !_floodLighting;
+            LightingButton.Background = _floodLighting
+                ? (Brush)Application.Current.Resources["OverlayStrokeBrush"]
+                : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            if (_webReady) TryPost(new { type = "setLighting", flood = _floodLighting });
+            ShowToast(_floodLighting ? "Flood lighting on" : "Natural lighting on");
+        }
+
+        private void ShareButton_Click(object sender, RoutedEventArgs e)
+        {
+            var subject = _selected?.Name ?? "Solar System";
+            var package = new DataPackage();
+            package.SetText($"StarMap · {subject} · {_simTimeUtc:yyyy-MM-dd HH:mm:ss} UTC");
+            Clipboard.SetContent(package);
+            ShowToast("Scene summary copied");
+        }
+
+        private async void MenuButton_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new ContentDialog
+            {
+                XamlRoot = RootGrid.XamlRoot,
+                Title = "Navigation",
+                Content = "Drag to orbit · Scroll to zoom · Click a body to inspect\n\nSpace  Play / pause\nHome  Solar system overview\nCtrl+F  Search destinations\nEsc  Return to Explore",
+                CloseButtonText = "Done",
+                DefaultButton = ContentDialogButton.Close,
+            };
+            await dialog.ShowAsync();
+        }
+
+        private void RootGrid_KeyDown(object sender, KeyRoutedEventArgs e)
+        {
+            var focused = FocusManager.GetFocusedElement(RootGrid.XamlRoot);
+            var editing = focused is Microsoft.UI.Xaml.Controls.TextBox
+                or Microsoft.UI.Xaml.Controls.ComboBox
+                or Microsoft.UI.Xaml.Controls.DatePicker
+                or Microsoft.UI.Xaml.Controls.TimePicker;
+
+            if (e.Key == VirtualKey.Space && !editing)
+            {
+                PlayButton_Click(PlayButton, new RoutedEventArgs());
+                e.Handled = true;
+            }
+            else if (e.Key == VirtualKey.Home && !editing)
+            {
+                HomeButton_Click(HomeButton, new RoutedEventArgs());
+                e.Handled = true;
+            }
+            else if (e.Key == VirtualKey.Escape)
+            {
+                ShowPanel("explore");
+                e.Handled = true;
+            }
+            else if (e.Key == VirtualKey.F &&
+                     InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(CoreVirtualKeyStates.Down))
+            {
+                SearchTopButton_Click(SearchBox, new RoutedEventArgs());
+                e.Handled = true;
+            }
+        }
+
+        private void ShowToast(string message)
+        {
+            ToastText.Text = message;
+            ToastBar.Visibility = Visibility.Visible;
+            _toastTimer.Stop();
+            _toastTimer.Start();
         }
     }
 }

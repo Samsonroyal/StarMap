@@ -72,6 +72,18 @@ function handle(msg) {
       case 'play':
         if (msg.playing !== undefined) scene.setPlaying(msg.playing);
         break;
+      case 'setLighting':
+        scene.setLighting(Boolean(msg.flood));
+        break;
+      case 'select':
+        scene.setSelection(msg.id || null);
+        break;
+      case 'zoom':
+        if (Number.isFinite(msg.factor)) scene.adjustZoom(msg.factor);
+        break;
+      case 'resetView':
+        scene.resetView();
+        break;
     }
   } catch (e) {
     log('error', `handler: ${e.message}`);
