@@ -23,6 +23,8 @@ namespace StarMap.Models
         public double M0 { get; set; }          // mean anomaly at epoch, deg
         public double Mdot { get; set; }        // mean motion, deg/day
 
-        public double PeriodDays => 365.256898326 * Math.Pow(A, 1.5);
+        public double PeriodDays => Math.Abs(Mdot) > 1e-12
+            ? 360.0 / Math.Abs(Mdot)
+            : 365.256898326 * Math.Pow(A, 1.5);
     }
 }
