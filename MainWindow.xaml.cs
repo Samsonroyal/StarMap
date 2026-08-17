@@ -89,6 +89,7 @@ namespace StarMap
         private readonly Dictionary<string, BodyRow> _rowsById = new(StringComparer.OrdinalIgnoreCase);
 
         private bool _webReady;
+        private bool _firstFrameReceived;
         private bool _syncingTime;
         private bool _syncingSelection;
         private bool _playing = true;
@@ -182,6 +183,7 @@ namespace StarMap
             ErrorText.Text = message;
             ErrorBar.Visibility = Visibility.Visible;
             LoadingRing.IsActive = false;
+            LoadingOverlay.Visibility = Visibility.Collapsed;
             App.Log.Error(message);
         }
 
@@ -243,7 +245,6 @@ namespace StarMap
         private void OnWebReady()
         {
             _webReady = true;
-            LoadingRing.IsActive = false;
             App.Log.Info("Web renderer ready.");
 
             var payload = new
@@ -290,6 +291,13 @@ namespace StarMap
 
         private void OnFrame(JsonElement root)
         {
+            if (!_firstFrameReceived)
+            {
+                _firstFrameReceived = true;
+                LoadingRing.IsActive = false;
+                LoadingOverlay.Visibility = Visibility.Collapsed;
+            }
+
             if (root.TryGetProperty("timeIso", out var t) && t.ValueKind == JsonValueKind.String)
             {
                 if (DateTime.TryParse(t.GetString(), CultureInfo.InvariantCulture,
@@ -303,13 +311,17 @@ namespace StarMap
                 FpsText.Text = $"{fps.GetDouble():F0} fps";
 
             if (_selected?.Elements != null && _distanceRow != null)
-                _distanceRow.Value = FormatDistance(ComputeDistance(_selected));
+                _distanceRow.Value = FormatDistance(
+                    ComputeDistance(_selected),
+                    !string.Equals(_selected.Parent, "sun", StringComparison.OrdinalIgnoreCase));
         }
 
         private double ComputeDistance(BodyInfo body)
         {
-            var (x, y, z, _) = Ephemeris.Heliocentric(body, _simTimeUtc, id => _allBodies.Find(b => b.Id == id));
-            return Math.Sqrt(x * x + y * y + z * z);
+            if (body.Elements == null) return 0;
+            var (_, _, _, distanceFromParent) = Ephemeris.PositionRelative(
+                body.Elements, Ephemeris.DaysSinceJ2000(_simTimeUtc));
+            return distanceFromParent;
         }
 
         // ============================================================ Catalog / list
@@ -412,9 +424,12 @@ namespace StarMap
             if (body.Elements != null)
             {
                 var parent = string.Equals(body.Parent, "sun", StringComparison.OrdinalIgnoreCase) ? "Sun" : Capitalize(body.Parent);
-                _distanceRow = Row($"Distance from {parent}", FormatDistance(ComputeDistance(body)));
+                var isSatellite = !string.Equals(body.Parent, "sun", StringComparison.OrdinalIgnoreCase);
+                _distanceRow = Row($"Distance from {parent}", FormatDistance(ComputeDistance(body), isSatellite));
                 rows.Add(_distanceRow);
-                rows.Add(Row("Semi-major axis", $"{body.Elements.A:F3} AU"));
+                rows.Add(Row("Semi-major axis", isSatellite
+                    ? $"{body.Elements.A * Ephemeris.AU_KM:N0} km"
+                    : $"{body.Elements.A:F3} AU"));
                 rows.Add(Row("Eccentricity", $"{body.Elements.E:F4}"));
                 rows.Add(Row("Inclination", $"{body.Elements.I:F2}°"));
                 rows.Add(Row("Orbital period", FormatPeriod(body.Elements.PeriodDays)));
@@ -433,9 +448,9 @@ namespace StarMap
 
         private static InspectorRow Row(string label, string value) => new InspectorRow { Label = label, Value = value };
 
-        private static string FormatDistance(double au)
+        private static string FormatDistance(double au, bool preferKilometers = false)
         {
-            if (au < 0.001) return $"{au * Ephemeris.AU_KM:N0} km";
+            if (preferKilometers || au < 0.001) return $"{au * Ephemeris.AU_KM:N0} km";
             return $"{au:F3} AU";
         }
 
@@ -553,6 +568,13 @@ namespace StarMap
                 TryPost(new { type = "focus", id = _selected.Id });
         }
 
+        private void ResetBodyOrientationButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_selected == null || !_webReady) return;
+            TryPost(new { type = "resetBodyOrientation", id = _selected.Id });
+            ShowToast($"{_selected.Name} returned to physical rotation");
+        }
+
         private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
         {
             var query = SearchBox.Text?.Trim() ?? "";
@@ -668,7 +690,7 @@ namespace StarMap
             {
                 XamlRoot = RootGrid.XamlRoot,
                 Title = "Navigation",
-                Content = "Drag to orbit · Scroll to zoom · Click a body to inspect\n\nSpace  Play / pause\nHome  Solar system overview\nCtrl+F  Search destinations\nEsc  Return to Explore",
+                Content = "Drag empty space to orbit · Scroll to zoom · Click a body to inspect\nFocus a body, then drag it to turn the globe\n\nR  Return selected body to physical rotation\nSpace  Play / pause\nHome  Solar system overview\nCtrl+F  Search destinations\nEsc  Return to Explore",
                 CloseButtonText = "Done",
                 DefaultButton = ContentDialogButton.Close,
             };
@@ -691,6 +713,11 @@ namespace StarMap
             else if (e.Key == VirtualKey.Home && !editing)
             {
                 HomeButton_Click(HomeButton, new RoutedEventArgs());
+                e.Handled = true;
+            }
+            else if (e.Key == VirtualKey.R && !editing && _selected != null)
+            {
+                ResetBodyOrientationButton_Click(ResetBodyOrientationButton, new RoutedEventArgs());
                 e.Handled = true;
             }
             else if (e.Key == VirtualKey.Escape)

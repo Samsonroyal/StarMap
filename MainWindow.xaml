@@ -10,7 +10,13 @@
 
     <Grid x:Name="RootGrid" Background="#010205" KeyDown="RootGrid_KeyDown">
         <WebView2 x:Name="WebView" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" DefaultBackgroundColor="Black" />
-        <ProgressRing x:Name="LoadingRing" IsActive="True" Width="46" Height="46" Foreground="{StaticResource StarMapGreenBrush}" />
+        <Border x:Name="LoadingOverlay" Background="#010205" Canvas.ZIndex="100">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14">
+                <ProgressRing x:Name="LoadingRing" IsActive="True" Width="46" Height="46" Foreground="{StaticResource StarMapGreenBrush}" />
+                <TextBlock Text="Loading the solar system" FontSize="15" FontWeight="SemiBold" CharacterSpacing="45" HorizontalAlignment="Center" />
+                <TextBlock Text="Preparing live positions and planetary systems…" Foreground="{StaticResource MutedTextBrush}" FontSize="12" HorizontalAlignment="Center" />
+            </StackPanel>
+        </Border>
 
         <!-- Header -->
         <Grid x:Name="HeaderDragRegion" VerticalAlignment="Top" Height="68" Padding="20,8,152,8">
@@ -118,6 +124,10 @@
                                 <Button x:Name="FocusButton" Click="FocusButton_Click" HorizontalAlignment="Stretch" Background="#EAEAEC" Foreground="#111216">
                                     <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE8A3;" FontSize="14" /><TextBlock Text="Focus camera" FontWeight="SemiBold" /></StackPanel>
                                 </Button>
+                                <Button x:Name="ResetBodyOrientationButton" Click="ResetBodyOrientationButton_Click" HorizontalAlignment="Stretch" ToolTipService.ToolTip="Resume the body's physical axial rotation (R)">
+                                    <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE777;" FontSize="14" /><TextBlock Text="Return to physical rotation" FontWeight="SemiBold" /></StackPanel>
+                                </Button>
+                                <TextBlock Text="After focusing, drag directly on the body to turn it. Drag empty space to orbit above, below, or beside it." TextWrapping="Wrap" FontSize="12" LineHeight="18" Foreground="{StaticResource MutedTextBrush}" />
                                 <TextBlock Text="ORBITAL DATA" FontSize="11" FontWeight="SemiBold" CharacterSpacing="170" Foreground="#8E9198" Margin="0,6,0,0" />
                                 <ItemsControl x:Name="InspectorRows">
                                     <ItemsControl.ItemTemplate>
