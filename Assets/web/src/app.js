@@ -13,20 +13,10 @@ function log(level, msg) {
 }
 
 const container = document.getElementById('container');
-const splash = document.getElementById('splash');
-let splashHidden = false;
-
-function hideSplash() {
-  if (splashHidden) return;
-  splashHidden = true;
-  splash.classList.add('hidden');
-  setTimeout(() => { splash.remove(); }, 600);
-}
 
 const scene = createScene({
   container,
   onFrame: ({ fps, timeDate }) => {
-    hideSplash();
     post({ type: 'frame', timeIso: timeDate.toISOString(), fps });
   },
   onSelected: (id) => {
@@ -83,6 +73,9 @@ function handle(msg) {
         break;
       case 'resetView':
         scene.resetView();
+        break;
+      case 'resetBodyOrientation':
+        scene.resetBodyOrientation(msg.id || null);
         break;
     }
   } catch (e) {

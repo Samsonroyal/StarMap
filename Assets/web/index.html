@@ -77,6 +77,26 @@
     .label.selected .label-marker::after { opacity: 1; transform: scale(1); }
     .label.selected { color: #fff; }
     .label.selected .label-marker { box-shadow: 0 0 12px var(--body-color); }
+    .label-moon,
+    .label-asteroid,
+    .label-comet {
+      gap: 6px;
+      font-size: 10px;
+      letter-spacing: 0.14em;
+    }
+    .label-moon .label-marker,
+    .label-asteroid .label-marker,
+    .label-comet .label-marker {
+      width: 10px;
+      height: 10px;
+    }
+    .label-moon .label-marker::after,
+    .label-asteroid .label-marker::after,
+    .label-comet .label-marker::after {
+      width: 2px;
+      height: 2px;
+      margin: 3px;
+    }
     @keyframes labelIn {
       from { opacity: 0; transform: translate(-50%, 4px); }
       to { opacity: 1; transform: translate(-50%, 0); }
@@ -85,44 +105,10 @@
       .label { animation: none; opacity: 1; }
     }
 
-    /* Splash while Three.js boots */
-    #splash {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 14px;
-      background: radial-gradient(ellipse at 50% 40%, #0b1030 0%, #020208 65%);
-      z-index: 10;
-      transition: opacity 0.5s ease;
-      font-family: "Segoe UI", system-ui, sans-serif;
-    }
-    #splash.hidden { opacity: 0; pointer-events: none; }
-    #splash .ring {
-      width: 42px;
-      height: 42px;
-      border-radius: 50%;
-      border: 3px solid rgba(120, 170, 255, 0.15);
-      border-top-color: #7ab7ff;
-      animation: spin 0.9s linear infinite;
-    }
-    #splash .title { font-size: 15px; font-weight: 600; letter-spacing: 0.08em; }
-    #splash .sub { font-size: 12px; color: #8fa3c8; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    @media (prefers-reduced-motion: reduce) {
-      #splash .ring { animation: none; }
-    }
   </style>
 </head>
 <body>
   <div id="container"></div>
-  <div id="splash" aria-hidden="true">
-    <div class="ring"></div>
-    <div class="title">StarMap</div>
-    <div class="sub">Loading&hellip;</div>
-  </div>
   <script type="importmap">
   {
     "imports": {

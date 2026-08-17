@@ -10,6 +10,8 @@ import {
 } from './ephemeris.js';
 
 const AU = AU_TO_SCENE;
+const DEG = Math.PI / 180;
+const SCENE_Z = new THREE.Vector3(0, 0, 1);
 
 // Maps the ecliptic frame (X, Y, Z with Z out-of-plane) into the scene frame
 // (ecliptic roughly horizontal, out-of-plane up): x = X, y = Z, z = -Y.
@@ -36,6 +38,9 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
     logarithmicDepthBuffer: true,
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.08;
   renderer.setSize(container.clientWidth || window.innerWidth, container.clientHeight || window.innerHeight);
   container.appendChild(renderer.domElement);
 
@@ -90,7 +95,25 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
     if (!name) return null;
     const tex = new THREE.TextureLoader().load(`textures/${name}`);
     tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
     return tex;
+  }
+
+  function displayOrbitScale(body) {
+    return Number.isFinite(body.orbitScale) && body.orbitScale > 0 ? body.orbitScale : AU;
+  }
+
+  function orientToParentEquator(body, vector) {
+    if (!body.orbitInParentEquator) return vector;
+    const parent = records.get(body.parent)?.info;
+    if (parent?.axialTiltDeg) vector.applyAxisAngle(SCENE_Z, -parent.axialTiltDeg * DEG);
+    return vector;
+  }
+
+  function applyFlattening(object, body) {
+    const flattening = THREE.MathUtils.clamp(body.flattening || 0, 0, 0.2);
+    object.scale.y = 1 - flattening;
+    return object;
   }
 
   function hexColor(hex, fallback) {
@@ -153,10 +176,11 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
     return new THREE.Points(geo, mat);
   }
 
-  function makeLabel(text, color) {
+  function makeLabel(text, color, kind) {
     const div = document.createElement('div');
-    div.className = 'label';
+    div.className = `label label-${kind || 'body'}`;
     div.style.setProperty('--body-color', color || '#9aa3ad');
+    div.setAttribute('aria-label', `${text}, ${kind || 'celestial body'}`);
     const marker = document.createElement('span');
     marker.className = 'label-marker';
     const name = document.createElement('span');
@@ -228,7 +252,7 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
           gl_FragColor = vec4(c, 1.0) * f * intensity;
         }`,
     });
-    return new THREE.Mesh(geo, mat);
+    return applyFlattening(new THREE.Mesh(geo, mat), body);
   }
 
   function buildPlanetMesh(body) {
@@ -238,6 +262,9 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
     if (body.nightTexture) {
       const night = loadTexture(body.nightTexture);
       const mat = new THREE.ShaderMaterial({
+        depthTest: true,
+        depthWrite: true,
+        transparent: false,
         uniforms: {
           dayMap: { value: tex },
           nightMap: { value: night },
@@ -247,6 +274,8 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
           floodMix: { value: 0 },
         },
         vertexShader: `
+          #include <common>
+          #include <logdepthbuf_pars_vertex>
           varying vec2 vUv;
           varying vec3 vNormal;
           varying vec3 vWorldPos;
@@ -256,16 +285,19 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
             vWorldPos = wp.xyz;
             vNormal = normalize(mat3(modelMatrix) * normal);
             gl_Position = projectionMatrix * viewMatrix * wp;
+            #include <logdepthbuf_vertex>
           }`,
         fragmentShader: `
+          #include <logdepthbuf_pars_fragment>
           uniform sampler2D dayMap; uniform sampler2D nightMap;
           uniform vec3 sunDir; uniform vec3 specColor; uniform float specIntensity; uniform float floodMix;
           varying vec2 vUv; varying vec3 vNormal; varying vec3 vWorldPos;
           void main() {
+            #include <logdepthbuf_fragment>
             vec3 n = normalize(vNormal);
             float sunAmt = mix(max(dot(n, sunDir), 0.0), 1.0, floodMix);
             vec3 day = texture2D(dayMap, vUv).rgb;
-            vec3 night = texture2D(nightMap, vUv).rgb * 1.6;
+            vec3 night = texture2D(nightMap, vUv).rgb * 1.6 + vec3(0.002, 0.004, 0.009);
             vec3 color = mix(night, day, smoothstep(0.04, 0.42, sunAmt));
             vec3 viewDir = normalize(cameraPosition - vWorldPos);
             vec3 halfVec = normalize(viewDir + sunDir);
@@ -274,7 +306,7 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
             gl_FragColor = vec4(color, 1.0);
           }`,
       });
-      return new THREE.Mesh(new THREE.SphereGeometry(R, 48, 48), mat);
+      return applyFlattening(new THREE.Mesh(new THREE.SphereGeometry(R, 64, 48), mat), body);
     }
 
     if (tex) {
@@ -284,7 +316,7 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
         metalness: 0,
         emissive: 0x0a0a10,
       });
-      return new THREE.Mesh(new THREE.SphereGeometry(R, 48, 48), mat);
+      return applyFlattening(new THREE.Mesh(new THREE.SphereGeometry(R, 64, 48), mat), body);
     }
 
     const mat = new THREE.MeshStandardMaterial({
@@ -292,7 +324,7 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
       roughness: 0.95,
       metalness: 0,
     });
-    return new THREE.Mesh(new THREE.SphereGeometry(R, 32, 32), mat);
+    return applyFlattening(new THREE.Mesh(new THREE.SphereGeometry(R, 48, 32), mat), body);
   }
 
   function buildRing(body) {
@@ -311,8 +343,10 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
     const tex = loadTexture(body.ringTexture);
     const mat = new THREE.MeshBasicMaterial({
       map: tex,
+      color: hexColor(body.ringColor, '#ffffff'),
       side: THREE.DoubleSide,
       transparent: true,
+      opacity: body.ringOpacity ?? 1,
       alphaTest: 0.04,
       depthWrite: false,
     });
@@ -324,13 +358,14 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
     const tex = loadTexture(body.cloudsTexture);
     if (!tex) return null;
     const mat = new THREE.MeshStandardMaterial({
-      map: tex,
+      color: hexColor(body.cloudsColor, '#ffffff'),
+      alphaMap: tex,
       transparent: true,
-      opacity: 0.85,
+      opacity: body.cloudsOpacity ?? 0.65,
       depthWrite: false,
       roughness: 1,
     });
-    return new THREE.Mesh(new THREE.SphereGeometry(R * 1.012, 48, 48), mat);
+    return applyFlattening(new THREE.Mesh(new THREE.SphereGeometry(R * 1.012, 64, 48), mat), body);
   }
 
   // ---------------------------------------------------------------- add / update
@@ -340,17 +375,19 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
 
     const mover = new THREE.Group();
     scene.add(mover);
+    const manualPivot = new THREE.Group();
+    mover.add(manualPivot);
 
     let mesh;
     if (isSun) {
       const built = buildSun(body);
-      mover.add(built.group);
+      manualPivot.add(built.group);
       mesh = built.mesh;
     } else {
       const tiltGroup = new THREE.Group();
       mesh = buildPlanetMesh(body);
       tiltGroup.add(mesh);
-      if (body.ringTexture) {
+      if (body.ringTexture || (body.ringOuter > body.ringInner && body.ringInner > 0)) {
         const ring = buildRing(body);
         ring.rotation.x = Math.PI / 2;
         tiltGroup.add(ring);
@@ -359,12 +396,13 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
       if (clouds) tiltGroup.add(clouds);
       if (body.atmosphere) tiltGroup.add(buildAtmosphere(body));
       if (body.axialTiltDeg) tiltGroup.rotation.z = -body.axialTiltDeg * Math.PI / 180;
-      mover.add(tiltGroup);
+      manualPivot.add(tiltGroup);
       mover.userData.spinMesh = mesh;
     }
 
-    const label = makeLabel(body.name, body.color);
-    label.position.y = (body.visualRadius || 1) + 1.0;
+    const label = makeLabel(body.name, body.color, body.kind);
+    const labelRadius = Math.max(body.visualRadius || 1, 0.02);
+    label.position.y = Math.max(labelRadius * 1.18, labelRadius + 0.18);
     mover.add(label);
     mesh.userData.bodyId = body.id;
 
@@ -379,7 +417,11 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
       if (parentObj) {
         const pts = new Float32Array(256 * 3);
         sampleOrbit(body.elements, 256, pts);
-        for (let i = 0; i < 256; i++) toScene(pts.subarray(i * 3, i * 3 + 3), tmpVec).multiplyScalar(AU).toArray(pts, i * 3);
+        const scale = displayOrbitScale(body);
+        for (let i = 0; i < 256; i++) {
+          toScene(pts.subarray(i * 3, i * 3 + 3), tmpVec);
+          orientToParentEquator(body, tmpVec).multiplyScalar(scale).toArray(pts, i * 3);
+        }
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(pts, 3));
         const mat = new THREE.LineBasicMaterial({
@@ -411,7 +453,10 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
     }
 
     const rec = {
-      info: body, mover, mesh, label, orbit, trail, trailArray, rel, isSmall: isSmallKind(body.kind),
+      info: body, mover, manualPivot, mesh, label, orbit, trail, trailArray, rel,
+      lastTrailDays: Number.NaN,
+      isSmall: isSmallKind(body.kind),
+      manualOrientation: false,
     };
     records.set(body.id, rec);
     return rec;
@@ -423,24 +468,30 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
     const b = rec.info;
     if (!b.elements) { out.set(0, 0, 0); return out; }
     positionRelative(b.elements, nowDays, rec.rel);
-    if (b.parent === 'sun') return toScene(rec.rel, out);
+    const scale = displayOrbitScale(b);
+    if (b.parent === 'sun') return toScene(rec.rel, out).multiplyScalar(scale);
     const parent = records.get(b.parent);
     if (parent) {
       updatePosition(parent, nowDays, out);
-      return out.add(toScene(rec.rel, tmpVec));
+      toScene(rec.rel, tmpVec);
+      orientToParentEquator(b, tmpVec).multiplyScalar(scale);
+      return out.add(tmpVec);
     }
-    return toScene(rec.rel, out);
+    return toScene(rec.rel, out).multiplyScalar(scale);
   }
 
   function updateTrail(rec, nowDays) {
     if (!rec.trail || !rec.trailArray || !rec.info.elements) return;
+    const minStep = Math.max(rec.info.trailDays / 220, 1 / 1440);
+    if (Number.isFinite(rec.lastTrailDays) && Math.abs(nowDays - rec.lastTrailDays) < minStep) return;
+    rec.lastTrailDays = nowDays;
     sampleTrail(rec.info.elements, nowDays, rec.info.trailDays, 220, rec.trailArray);
     const arr = rec.trailArray;
+    const scale = displayOrbitScale(rec.info);
     for (let i = 0; i < 220; i++) {
       const X = arr[i * 3], Y = arr[i * 3 + 1], Z = arr[i * 3 + 2];
-      arr[i * 3] = X * AU;
-      arr[i * 3 + 1] = Z * AU;
-      arr[i * 3 + 2] = -Y * AU;
+      tmpVec.set(X, Z, -Y);
+      orientToParentEquator(rec.info, tmpVec).multiplyScalar(scale).toArray(arr, i * 3);
     }
     rec.trail.geometry.attributes.position.needsUpdate = true;
   }
@@ -457,12 +508,38 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
     for (const rec of records.values()) {
       const show = categoryVisible(rec.info.kind);
       rec.mover.visible = show;
-      if (rec.orbit) rec.orbit.visible = show && toggles.orbits;
-      if (rec.trail) rec.trail.visible = show && toggles.trails;
-      rec.label.visible = show && toggles.labels;
     }
     starField.visible = toggles.stars;
     belt.visible = toggles.belt;
+    updateDetailVisibility();
+  }
+
+  function satelliteDetailVisible(rec) {
+    if (rec.info.kind !== 'moon') return true;
+    if (selectedId === rec.info.id || followId === rec.info.id || followId === rec.info.parent) return true;
+    const parent = records.get(rec.info.parent);
+    if (!parent?.helio) return false;
+    const detailDistance = Math.max(110, (parent.info.visualRadius || 1) * 18);
+    return camera.position.distanceTo(parent.helio) <= detailDistance;
+  }
+
+  function labelDetailVisible(rec) {
+    if (rec.info.kind === 'moon') return satelliteDetailVisible(rec);
+    if (!rec.isSmall || rec.info.kind === 'dwarf') return true;
+    if (selectedId === rec.info.id || followId === rec.info.id) return true;
+    if (!rec.helio) return false;
+    const detailDistance = Math.max(18, (rec.info.visualRadius || 0.02) * 800);
+    return camera.position.distanceTo(rec.helio) <= detailDistance;
+  }
+
+  function updateDetailVisibility() {
+    for (const rec of records.values()) {
+      const show = categoryVisible(rec.info.kind);
+      const orbitDetail = satelliteDetailVisible(rec);
+      if (rec.orbit) rec.orbit.visible = show && toggles.orbits && orbitDetail;
+      if (rec.trail) rec.trail.visible = show && toggles.trails && orbitDetail;
+      rec.label.visible = show && toggles.labels && labelDetailVisible(rec);
+    }
   }
 
   function setSelection(id) {
@@ -497,6 +574,72 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
   }
 
   let hovered = null;
+  let bodyDrag = null;
+  let suppressNextClick = false;
+  const screenRight = new THREE.Vector3();
+  const screenUp = new THREE.Vector3();
+  const dragRotation = new THREE.Quaternion();
+
+  function canManipulate(rec) {
+    return rec && (selectedId === rec.info.id || followId === rec.info.id);
+  }
+
+  renderer.domElement.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || flight) return;
+    const rec = pickMesh(e);
+    if (!canManipulate(rec)) return;
+    bodyDrag = {
+      rec,
+      pointerId: e.pointerId,
+      lastX: e.clientX,
+      lastY: e.clientY,
+      distance: 0,
+      moved: false,
+    };
+    controls.enabled = false;
+    renderer.domElement.setPointerCapture(e.pointerId);
+    renderer.domElement.style.cursor = 'grabbing';
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }, true);
+
+  renderer.domElement.addEventListener('pointermove', (e) => {
+    if (!bodyDrag || bodyDrag.pointerId !== e.pointerId) return;
+    const dx = e.clientX - bodyDrag.lastX;
+    const dy = e.clientY - bodyDrag.lastY;
+    bodyDrag.lastX = e.clientX;
+    bodyDrag.lastY = e.clientY;
+    bodyDrag.distance += Math.hypot(dx, dy);
+    if (bodyDrag.distance >= 3) {
+      bodyDrag.moved = true;
+      bodyDrag.rec.manualOrientation = true;
+      screenUp.set(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
+      screenRight.set(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
+      dragRotation.setFromAxisAngle(screenUp, dx * 0.008);
+      bodyDrag.rec.manualPivot.quaternion.premultiply(dragRotation);
+      dragRotation.setFromAxisAngle(screenRight, dy * 0.008);
+      bodyDrag.rec.manualPivot.quaternion.premultiply(dragRotation).normalize();
+    }
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }, true);
+
+  function finishBodyDrag(e) {
+    if (!bodyDrag || bodyDrag.pointerId !== e.pointerId) return;
+    suppressNextClick = bodyDrag.moved;
+    if (renderer.domElement.hasPointerCapture(e.pointerId)) {
+      renderer.domElement.releasePointerCapture(e.pointerId);
+    }
+    bodyDrag = null;
+    controls.enabled = !flight;
+    renderer.domElement.style.cursor = hovered && canManipulate(hovered) ? 'grab' : (hovered ? 'pointer' : 'default');
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }
+
+  renderer.domElement.addEventListener('pointerup', finishBodyDrag, true);
+  renderer.domElement.addEventListener('pointercancel', finishBodyDrag, true);
+
   renderer.domElement.addEventListener('pointermove', (e) => {
     const rec = pickMesh(e);
     if (rec !== hovered) {
@@ -504,7 +647,7 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
       hovered = rec;
       if (hovered) hovered.label.element.classList.add('hover');
     }
-    renderer.domElement.style.cursor = rec ? 'pointer' : 'default';
+    renderer.domElement.style.cursor = rec && canManipulate(rec) ? 'grab' : (rec ? 'pointer' : 'default');
   });
 
   renderer.domElement.addEventListener('pointerleave', () => {
@@ -559,6 +702,10 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
   }
 
   renderer.domElement.addEventListener('click', (e) => {
+    if (suppressNextClick) {
+      suppressNextClick = false;
+      return;
+    }
     const rec = pickMesh(e);
     if (rec) flyTo(rec.info.id);
     else setSelection(null);
@@ -612,6 +759,14 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
       const uniforms = rec.mesh?.material?.uniforms;
       if (uniforms?.floodMix) uniforms.floodMix.value = floodLighting ? 1 : 0;
     }
+  }
+
+  function resetBodyOrientation(id = selectedId) {
+    const rec = id ? records.get(id) : null;
+    if (!rec) return false;
+    rec.manualPivot.quaternion.identity();
+    rec.manualOrientation = false;
+    return true;
   }
 
   function adjustZoom(factor) {
@@ -676,12 +831,14 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
       rec.mover.position.copy(rec.helio);
       updateTrail(rec, nowDays);
 
-      if (b.rotationHours && Math.abs(b.rotationHours) > 0.001 && rec.mover.userData.spinMesh) {
+      if (!rec.manualOrientation && b.rotationHours && Math.abs(b.rotationHours) > 0.001 && rec.mover.userData.spinMesh) {
         const spin = rec.mover.userData.spinMesh;
-        const rotPerDay = (2 * Math.PI) / Math.abs(b.rotationHours);
-        spin.rotation.y += rotPerDay * (dtSec * speedSeconds / 86400) * Math.sign(b.rotationHours);
+        const phase = (b.rotationPhaseDeg || 0) + nowDays * 24 / b.rotationHours * 360;
+        spin.rotation.y = THREE.MathUtils.euclideanModulo(phase, 360) * DEG;
       }
     }
+
+    updateDetailVisibility();
 
     // Sun direction for the day/night shader, and follow target.
     for (const rec of records.values()) {
@@ -729,6 +886,7 @@ export function createScene({ container, onFrame, onSelected, onFocus }) {
     setSpeed,
     setPlaying,
     setLighting,
+    resetBodyOrientation,
     setSelection,
     adjustZoom,
     resetView,

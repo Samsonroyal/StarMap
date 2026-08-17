@@ -96,34 +96,13 @@ export function sampleOrbit(el, points, dest) {
 
 // Trails sample past positions for [now - trailDays, now].
 export function sampleTrail(el, nowDays, trailDays, points, dest) {
-  const a = el.a;
-  const e = Math.min(0.999999, el.e);
-  const i = (el.i) * DEG;
-  const raan = el.raan * DEG;
-  const wp = el.wp * DEG;
-
-  const cr = Math.cos(raan); const sr = Math.sin(raan);
-  const cw = Math.cos(wp); const sw = Math.sin(wp);
-  const ci = Math.cos(i); const si = Math.sin(i);
-
+  const position = [0, 0, 0];
   for (let s = 0; s < points; s++) {
     const t = nowDays - trailDays * (1 - s / (points - 1));
-    const m = ((el.m0 + el.mdot * (t - el.epochDays)) % 360 + 360) % 360 * DEG;
-    const E = solveKepler(m, e);
-    const nu = 2 * Math.atan2(
-      Math.sqrt(1 + e) * Math.sin(E / 2),
-      Math.sqrt(1 - e) * Math.cos(E / 2));
-    const r = a * (1 - e * Math.cos(E));
-    const x = r * Math.cos(nu);
-    const y = r * Math.sin(nu);
-
-    const X = (cr * cw - sr * sw * ci) * x + (-cr * sw - sr * cw * ci) * y;
-    const Y = (sr * cw + cr * sw * ci) * x + (-sr * sw + cr * cw * ci) * y;
-    const Z = (sw * si) * x + (cw * si) * y;
-
-    dest[s * 3] = X;
-    dest[s * 3 + 1] = Y;
-    dest[s * 3 + 2] = Z;
+    positionRelative(el, t, position);
+    dest[s * 3] = position[0];
+    dest[s * 3 + 1] = position[1];
+    dest[s * 3 + 2] = position[2];
   }
 }
 
