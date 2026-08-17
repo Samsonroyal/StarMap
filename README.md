@@ -60,3 +60,7 @@ The app is unpackaged and self-contained (`WindowsPackageType=None`, `WindowsApp
   - `src/ephemeris.js`, `scene.js`, `app.js` — Kepler math, 3D scene, host messaging.
 
 ## Notes
+This is a passion project; and will morph into a map that supports the enitre Milky way galaxy for future travellers; 
+
+## Contribution
+If you want to contribute to this repo; please fork the repo, make your changes then create a PR to merge your changes. 
