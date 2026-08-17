@@ -60,7 +60,3 @@ The app is unpackaged and self-contained (`WindowsPackageType=None`, `WindowsApp
   - `src/ephemeris.js`, `scene.js`, `app.js` — Kepler math, 3D scene, host messaging.
 
 ## Notes
-
-- Log: `%LocalAppData%\StarMap\starmap.log` (startup, web bridge, SBDB fetch results).
-- Planet-to-Sun distances share one linear AU scale, so planets lie on their rendered orbit paths and retain correct relative positions. Each moon system uses a larger, internally consistent display scale so satellite paths remain legible beside visually exaggerated planet radii.
-- Planet and moon positions use approximate/mean elements — accurate for educational visualization, not mission-grade. Long-term satellite perturbations and planet–moon barycentric motion require JPL Horizons or NAIF SPICE kernels.
