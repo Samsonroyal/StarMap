@@ -13,6 +13,7 @@ namespace StarMap.Data
     public static class BodyCatalog
     {
         private const double DaysPerCentury = 36525.0;
+        private const double AuKm = 149597870.7;
 
         public static List<BodyInfo> All { get; } = BuildCatalog();
 
@@ -55,7 +56,7 @@ namespace StarMap.Data
                     false, "#ffffff", 0,
                     "The Red Planet: iron-oxide dust, polar caps, and ancient riverbeds."),
 
-                Planet("jupiter", "Jupiter", 69911.0, 1.89813e27, 9.925, 3.13, 4.4, "#d8a074",
+                Planet("jupiter", "Jupiter", 69911.0, 1.89813e27, 9.925, 3.13, 7.2, "#d8a074",
                     "jupiter.jpg", null, null, 800,
                     5.20288700, -0.00011607, 0.04838624, -0.00013253, 1.30439695, -0.00183714,
                     34.39644051, 3034.74612775, 14.72847983, 0.21252668, 100.47390909, 0.20469106,
@@ -63,7 +64,7 @@ namespace StarMap.Data
                     false, "#ffffff", 0,
                     "The giant of the Solar System; Great Red Spot and dozens of moons."),
 
-                Planet("saturn", "Saturn", 58232.0, 5.68319e26, 10.656, 26.73, 3.8, "#e5d3a3",
+                Planet("saturn", "Saturn", 58232.0, 5.68319e26, 10.656, 26.73, 6.6, "#e5d3a3",
                     "saturn.jpg", null, null, 1200,
                     9.53667594, -0.00125060, 0.05386179, -0.00050991, 2.48599187, 0.00193609,
                     49.95424423, 1222.49362201, 92.59887831, -0.41897216, 113.66242448, -0.28867794,
@@ -71,7 +72,7 @@ namespace StarMap.Data
                     false, "#ffffff", 0,
                     "The ringed jewel of the Solar System; rings of ice and rock."),
 
-                Planet("uranus", "Uranus", 25362.0, 8.68103e25, -17.24, 97.77, 2.2, "#a8e0f0",
+                Planet("uranus", "Uranus", 25362.0, 8.68103e25, -17.24, 97.77, 3.6, "#a8e0f0",
                     "uranus.jpg", null, null, 2500,
                     19.18916464, -0.00196176, 0.04725744, -0.00004397, 0.77263783, -0.00242939,
                     313.23810451, 428.48202785, 170.95427630, 0.40805281, 74.01692512, 0.04240589,
@@ -79,7 +80,7 @@ namespace StarMap.Data
                     false, "#ffffff", 0,
                     "An ice giant rolled on its side, likely from an ancient collision."),
 
-                Planet("neptune", "Neptune", 24622.0, 1.0241e26, 16.11, 28.32, 2.15, "#5d7bff",
+                Planet("neptune", "Neptune", 24622.0, 1.0241e26, 16.11, 28.32, 3.5, "#5d7bff",
                     "neptune.jpg", null, null, 4000,
                     30.06992276, 0.00026291, 0.00859048, 0.00005105, 1.77004347, 0.00035372,
                     -55.12002969, 218.45945325, 44.96476227, -0.32241464, 131.78422574, -0.00508664,
@@ -87,7 +88,7 @@ namespace StarMap.Data
                     false, "#ffffff", 0,
                     "The windiest planet; supersonic storms in a cold blue atmosphere."),
 
-                Planet("pluto", "Pluto", 1188.3, 1.303e22, 153.29, 122.5, 0.6, "#cbb69b",
+                Planet("pluto", "Pluto", 1188.3, 1.303e22, 153.29, 122.5, 0.38, "#cbb69b",
                     null, null, null, 8000,
                     39.48211675, -0.00031596, 0.24882730, 0.00005170, 17.14001206, 0.00004818,
                     238.92903833, 145.20780515, 224.06891629, -0.04062942, 110.30393684, -0.01183482,
@@ -99,12 +100,67 @@ namespace StarMap.Data
             if (saturn != null)
             {
                 saturn.RingTexture = "saturn_ring_alpha.png";
+                saturn.Flattening = 0.09796;
+                saturn.RingColor = "#ddd1b4";
                 saturn.RingInner = 1.24; // 1.11/0.9 visual radii ≈ 74,500/60,000 km
                 saturn.RingOuter = 2.27; // 2.04/0.9 ≈ 136,800 km
             }
 
+            var venus = list.Find(b => b.Id == "venus");
+            if (venus != null)
+            {
+                // The base map is Magellan radar topography. An opaque, warm cloud
+                // layer produces Venus's visible-light appearance.
+                venus.CloudsTexture = "earth_clouds.jpg";
+                venus.CloudsColor = "#f3d49a";
+                venus.CloudsOpacity = 0.88;
+                venus.Atmosphere = new AtmosphereInfo { Color = "#e8b96f", Intensity = 0.46, Power = 3.4 };
+            }
+
+            var earth = list.Find(b => b.Id == "earth");
+            if (earth != null) earth.Flattening = 0.00335;
+            var jupiter = list.Find(b => b.Id == "jupiter");
+            if (jupiter != null) jupiter.Flattening = 0.06487;
+            var uranus = list.Find(b => b.Id == "uranus");
+            if (uranus != null)
+            {
+                uranus.Flattening = 0.02293;
+                uranus.RingInner = 1.64;
+                uranus.RingOuter = 2.00;
+                uranus.RingColor = "#8aa0a4";
+                uranus.RingOpacity = 0.34;
+            }
+            var neptune = list.Find(b => b.Id == "neptune");
+            if (neptune != null) neptune.Flattening = 0.01708;
+            var pluto = list.Find(b => b.Id == "pluto");
+            if (pluto != null) pluto.Kind = "dwarf";
+
+            list.AddRange(MajorMoons());
             list.AddRange(SmallBodySeed());
+            ValidateCatalog(list);
             return list;
+        }
+
+        private static void ValidateCatalog(IReadOnlyList<BodyInfo> bodies)
+        {
+            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var planetCount = 0;
+            var moonCount = 0;
+            foreach (var body in bodies)
+            {
+                if (string.IsNullOrWhiteSpace(body.Id) || !ids.Add(body.Id))
+                    throw new InvalidOperationException($"Invalid or duplicate body id: '{body.Id}'.");
+                if (body.Id != "sun" && !ids.Contains(body.Parent))
+                    throw new InvalidOperationException($"Body '{body.Id}' appears before missing parent '{body.Parent}'.");
+                if (body.RadiusKm <= 0 || body.VisualRadius <= 0)
+                    throw new InvalidOperationException($"Body '{body.Id}' has an invalid radius.");
+                if (body.Elements is { } el && (el.A <= 0 || el.E < 0 || el.E >= 1))
+                    throw new InvalidOperationException($"Body '{body.Id}' has invalid elliptic elements.");
+                if (body.Kind == "planet") planetCount++;
+                if (body.Kind == "moon") moonCount++;
+            }
+            if (planetCount != 8 || moonCount < 20)
+                throw new InvalidOperationException($"Catalog is incomplete ({planetCount} planets, {moonCount} moons).");
         }
 
         private static BodyInfo Star()
@@ -118,21 +174,83 @@ namespace StarMap.Data
 
         private static BodyInfo Moon()
         {
-            var moon = Base("moon", "Moon", "moon", 1737.4, 7.342e22, 655.728, 6.68, 0.45, "#cfcfcf");
+            var moon = Base("moon", "Moon", "moon", 1737.4, 7.342e22, 655.728, 6.68, 0.38, "#cfcfcf");
             moon.Parent = "earth";
             moon.Texture = "moon.jpg";
+            moon.OrbitScale = 3000;
             moon.TrailDays = 15;
             moon.Elements = new OrbitalElements
             {
                 EpochDays = 0,
-                A = 0.0025719, Adot = 0,
-                E = 0.0549, Edot = 0,
-                I = 5.1454, Idot = 0,
-                Raan = 125.1236, Raandot = -0.0529538,
-                Wp = 83.3532, Wpdot = 0.1114040,
-                M0 = 135.0003, Mdot = 13.1763580,
+                A = 384400.0 / AuKm, Adot = 0,
+                E = 0.0554, Edot = 0,
+                I = 5.16, Idot = 0,
+                Raan = 125.08, Raandot = 0,
+                Wp = 318.15, Wpdot = 0,
+                M0 = 135.27, Mdot = 360.0 / 27.322,
             };
             moon.Description = "Earth's only natural satellite, tidally locked and cratered.";
+            return moon;
+        }
+
+        /// <summary>
+        /// Major natural satellites using JPL mean elements at J2000. The giant-planet
+        /// and Pluto-system elements are expressed in their parent's equatorial/Laplace
+        /// plane; the renderer rotates those local planes with the parent body's axis.
+        /// </summary>
+        private static List<BodyInfo> MajorMoons() => new()
+        {
+            Satellite("phobos", "Phobos", "mars", 11.08, 1.0659e16, 0.3187, 9375, 0.015, 216.3, 189.7, 1.1, 169.2, 21000, 0.14, "#8f8171", "Mars's larger, innermost moon."),
+            Satellite("deimos", "Deimos", "mars", 6.2, 1.4762e15, 1.2625, 23457, 0.000, 0.0, 205.0, 1.8, 54.3, 21000, 0.12, "#a89b89", "Mars's small outer moon."),
+
+            Satellite("io", "Io", "jupiter", 1821.49, 8.9319e22, 1.762732, 421800, 0.004, 49.1, 330.9, 0.0, 0.0, 6000, 0.42, "#d9bd58", "Volcanically active Galilean moon of Jupiter."),
+            Satellite("europa", "Europa", "jupiter", 1560.80, 4.7998e22, 3.525463, 671100, 0.009, 45.0, 345.4, 0.5, 184.0, 6000, 0.38, "#c9b58c", "Ice-covered Galilean moon with a global subsurface ocean."),
+            Satellite("ganymede", "Ganymede", "jupiter", 2631.20, 1.4819e23, 7.155588, 1070400, 0.001, 198.3, 324.8, 0.2, 58.5, 6000, 0.50, "#918675", "The Solar System's largest moon."),
+            Satellite("callisto", "Callisto", "jupiter", 2410.30, 1.0759e23, 16.690440, 1882700, 0.007, 43.8, 87.4, 0.3, 309.1, 6000, 0.47, "#746b61", "A dark, ancient and heavily cratered Galilean moon."),
+
+            Satellite("mimas", "Mimas", "saturn", 198.20, 3.7493e19, 0.942422, 186000, 0.020, 160.4, 275.3, 1.6, 66.2, 5500, 0.20, "#c7c4bd", "Small icy moon marked by the giant Herschel crater."),
+            Satellite("enceladus", "Enceladus", "saturn", 252.10, 1.0802e20, 1.370218, 238400, 0.005, 119.5, 57.0, 0.0, 0.0, 5500, 0.23, "#e5ecf0", "Bright icy moon with an active ocean and south-polar plumes."),
+            Satellite("tethys", "Tethys", "saturn", 531.10, 6.1745e20, 1.887802, 295000, 0.001, 335.3, 0.0, 1.1, 273.0, 5500, 0.28, "#d8d5ce", "Icy Saturnian moon with the vast Odysseus crater."),
+            Satellite("dione", "Dione", "saturn", 561.40, 1.0955e21, 2.736916, 377700, 0.002, 116.0, 212.0, 0.0, 0.0, 5500, 0.29, "#c9c8c4", "Icy moon with bright fractured terrain."),
+            Satellite("rhea", "Rhea", "saturn", 763.50, 2.3065e21, 4.517503, 527200, 0.001, 44.3, 31.5, 0.3, 133.7, 5500, 0.33, "#c4c1ba", "Saturn's second-largest moon."),
+            Satellite("titan", "Titan", "saturn", 2574.76, 1.3452e23, 15.945448, 1221900, 0.029, 78.3, 11.7, 0.3, 78.6, 5500, 0.52, "#d5a34f", "A large moon with a dense nitrogen atmosphere and methane seas.", true),
+            Satellite("iapetus", "Iapetus", "saturn", 734.30, 1.8056e21, 79.331002, 3561700, 0.028, 254.5, 74.8, 7.6, 86.5, 5500, 0.32, "#9b927f", "Two-toned outer moon with a prominent equatorial ridge."),
+
+            Satellite("miranda", "Miranda", "uranus", 235.8, 6.59e19, 1.413479, 129846, 0.001, 154.8, 73.0, 4.4, 100.9, 5000, 0.21, "#c8c5be", "Small Uranian moon with dramatic fault canyons."),
+            Satellite("ariel", "Ariel", "uranus", 578.9, 1.353e21, 2.520379, 190929, 0.001, 9.6, 193.5, 0.0, 0.0, 5000, 0.29, "#d7d5d0", "Bright, geologically varied moon of Uranus."),
+            Satellite("umbriel", "Umbriel", "uranus", 584.7, 1.172e21, 4.144177, 265986, 0.004, 183.4, 253.0, 0.1, 174.8, 5000, 0.29, "#77746f", "The darkest of Uranus's five major moons."),
+            Satellite("titania", "Titania", "uranus", 788.9, 3.527e21, 8.705869, 436298, 0.002, 184.0, 68.1, 0.1, 29.5, 5000, 0.34, "#aaa7a0", "The largest moon of Uranus."),
+            Satellite("oberon", "Oberon", "uranus", 761.4, 3.014e21, 13.463237, 583511, 0.002, 132.2, 143.6, 0.1, 76.8, 5000, 0.33, "#8e877d", "A dark, cratered outer major moon of Uranus."),
+
+            Satellite("triton", "Triton", "neptune", 1352.60, 2.139e22, 5.876994, 354800, 0.000, 0.0, 63.0, 157.3, 178.1, 5000, 0.40, "#c9b8ad", "Neptune's large retrograde moon with active nitrogen geysers."),
+            Satellite("charon", "Charon", "pluto", 606.0, 1.586e21, 6.387222, 19600, 0.000, 0.0, 304.1, 0.0, 0.0, 5000, 0.28, "#a6a09a", "Pluto's large companion; the pair orbit a barycenter outside Pluto."),
+        };
+
+        private static BodyInfo Satellite(
+            string id, string name, string parent, double radiusKm, double massKg,
+            double periodDays, double aKm, double e, double wp, double m0,
+            double i, double raan, double orbitScale, double visualRadius,
+            string color, string description, bool atmosphere = false)
+        {
+            var moon = Base(id, name, "moon", radiusKm, massKg, periodDays * 24.0, 0, visualRadius, color);
+            moon.Parent = parent;
+            moon.OrbitScale = orbitScale;
+            moon.OrbitInParentEquator = true;
+            moon.TrailDays = Math.Min(periodDays, 30.0);
+            moon.Description = description;
+            moon.Elements = new OrbitalElements
+            {
+                EpochDays = 0,
+                A = aKm / AuKm,
+                E = e,
+                I = i,
+                Raan = raan,
+                Wp = wp,
+                M0 = m0,
+                Mdot = 360.0 / periodDays,
+            };
+            if (atmosphere)
+                moon.Atmosphere = new AtmosphereInfo { Color = "#d5a34f", Intensity = 0.28, Power = 3.8 };
             return moon;
         }
 
